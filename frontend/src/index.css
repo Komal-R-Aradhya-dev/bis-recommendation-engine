@@ -1,0 +1,225 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-bis-navy: #12294a;
+  --color-bis-blue: #2f6fe4;
+  --color-bis-blue-dark: #1e4fb0;
+  --color-bis-blue-soft: #eaf1fd;
+  --color-bis-blue-mist: #f4f8fe;
+
+  --color-surface-light: #ffffff;
+  --color-surface-light-alt: #f6f9fe;
+  --color-surface-dark: #111827;
+  --color-surface-dark-alt: #1a2333;
+
+  --color-border-light: #e2e8f5;
+  --color-border-dark: #2b3546;
+
+  --font-sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bis-blue-mist);
+  color: var(--color-bis-navy);
+  font-family: var(--font-sans);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+html.dark body {
+  background-color: #0b1220;
+  color: #e5edf9;
+}
+
+/* =========================================================
+   GLOBAL DARK MODE
+   ========================================================= */
+
+html.dark .bg-white {
+  background-color: #111827 !important;
+}
+
+html.dark .bg-surface-light {
+  background-color: #111827 !important;
+}
+
+html.dark .bg-surface-light-alt {
+  background-color: #172033 !important;
+}
+
+html.dark .bg-surface-dark {
+  background-color: #111827 !important;
+}
+
+html.dark .bg-surface-dark-alt {
+  background-color: #1a2333 !important;
+}
+
+html.dark .bg-slate-50 {
+  background-color: #172033 !important;
+}
+
+html.dark .bg-slate-100 {
+  background-color: #1e293b !important;
+}
+
+html.dark .bg-blue-50 {
+  background-color: #152d52 !important;
+}
+
+html.dark .bg-bis-blue-soft {
+  background-color: #17335f !important;
+}
+
+html.dark .bg-bis-blue-mist {
+  background-color: #0f172a !important;
+}
+
+/* Borders */
+
+html.dark .border-border-light {
+  border-color: #2b3546 !important;
+}
+
+html.dark .border-border-dark {
+  border-color: #2b3546 !important;
+}
+
+html.dark .border-slate-100 {
+  border-color: #263246 !important;
+}
+
+html.dark .border-slate-200 {
+  border-color: #334155 !important;
+}
+
+html.dark .border-blue-100 {
+  border-color: #294d80 !important;
+}
+
+/* Text */
+
+html.dark .text-bis-navy {
+  color: #e5edf9 !important;
+}
+
+html.dark .text-slate-900 {
+  color: #f1f5f9 !important;
+}
+
+html.dark .text-slate-800 {
+  color: #e2e8f0 !important;
+}
+
+html.dark .text-slate-700 {
+  color: #cbd5e1 !important;
+}
+
+html.dark .text-slate-600 {
+  color: #b4c0d1 !important;
+}
+
+html.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.dark .text-slate-400 {
+  color: #7f8da3 !important;
+}
+
+html.dark .text-bis-blue {
+  color: #60a5fa !important;
+}
+
+/* Hover */
+
+html.dark .hover\:bg-white:hover {
+  background-color: #1e293b !important;
+}
+
+html.dark .hover\:bg-slate-50:hover {
+  background-color: #172033 !important;
+}
+
+html.dark .hover\:bg-slate-100:hover {
+  background-color: #1e293b !important;
+}
+
+html.dark .hover\:bg-blue-100:hover {
+  background-color: #1b3865 !important;
+}
+
+/* Sidebar-specific backgrounds */
+
+html.dark [class*="bg-[#F7F9FD]"] {
+  background-color: #0f172a !important;
+}
+
+html.dark [class*="border-[#E4EAF4]"] {
+  border-color: #263246 !important;
+}
+
+/* Shadows */
+
+html.dark .shadow-card {
+  box-shadow:
+    0 8px 25px rgba(0, 0, 0, 0.22),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+/* Inputs */
+
+html.dark input,
+html.dark textarea,
+html.dark select {
+  background-color: #111827;
+  color: #e5edf9;
+  border-color: #334155;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748b;
+}
+
+/* Scrollbar */
+
+html.dark {
+  scrollbar-color: #475569 #0b1220;
+}
+
+html.dark ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html.dark ::-webkit-scrollbar-track {
+  background: #0b1220;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 999px;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
