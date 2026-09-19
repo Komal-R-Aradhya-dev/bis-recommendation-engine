@@ -1,0 +1,1833 @@
+PROJECT FRONTEND UI/UX AUDIT
+BIS Recommendation Engine
+Generated from actual repository inspection. Do not treat this as permission to change backend, APIs, auth, or business logic.
+
+Inspection scope: the live project at frontend/ and backend/.
+Ignored as non-product copies: .kilo/worktrees/deep-effect/.
+
+==================================================
+SECTION 1 — PROJECT OVERVIEW
+==================================================
+
+PROJECT NAME
+- Repository folder: bis-recommendation-engine
+- Frontend package.json name: "frontend" (Vite default; not a product name)
+- In-app product names actually rendered:
+  - "BIS Procurement Assistant" (Home empty state, loading state)
+  - "BIS Recommendation Engine" (Login heading)
+  - "BIS Standard Recommendation Engine" (Register subtitle)
+  - "BUREAU OF INDIAN STANDARDS" / "भारतीय मानक ब्यूरो" (Sidebar brand)
+- Browser tab title is currently the leftover Vite string "frontend" (frontend/index.html).
+
+WHAT THE APPLICATION DOES
+A working web app that helps Indian procurement users obtain Indian Standards recommendations.
+A signed-in user can:
+1. Type a procurement query and/or upload a tender PDF/DOCX.
+2. Send that request to the backend, which forwards it to an external RAG/LLM service.
+3. View extracted tender requirements, a summary, recommended Indian Standards, warnings, and expandable evidence/certification/testing/procurement details.
+4. Download a PDF report generated from a saved history record.
+5. Re-open previous analyses from a sidebar history list (restored from MongoDB; no second recommendation API call).
+6. Toggle light/dark theme and sign out.
+
+This is NOT a multi-turn chat product. frontend/src/types/chat.ts explicitly says there is no conversationId, no follow-up Q&A, and no message chaining. Home only shows one active analysis at a time.
+
+TARGET USERS
+- Primary: procurement officials.
+- Backend User.role enum is ["procurement_official", "admin"] with default "procurement_official" (backend/src/models/User.js).
+- The frontend displays role as a string badge/field. There is no admin-only UI, no role-based route, and no role-based feature gating in the frontend.
+- Secondary audience implied by branding: Government of India / Bureau of Indian Standards stakeholders and hackathon judges.
+
+PRIMARY USER WORKFLOW
+Register or Login
+→ Protected Home shell (Sidebar + TopBar + Composer)
+→ Submit query and/or PDF/DOCX
+→ Loading / analyzing state (abortable)
+→ Results: query, summary, tender requirements, recommendation cards, warnings
+→ Optional: Download PDF report
+→ Optional: New Analysis (clears current result)
+→ Optional: click a sidebar history item to restore a previous result
+→ Optional: Settings / Sign out
+
+FRONTEND vs BACKEND (KEEP THIS SPLIT ABSOLUTE)
+
+FRONTEND (UI only)
+- Path: frontend/
+- React 19.2.8 + TypeScript
+- Vite 8.3.0 (@vitejs/plugin-react)
+- React Router DOM 7.18.4
+- Tailwind CSS 4.3.3 via @tailwindcss/vite (no tailwind.config.js; tokens live in frontend/src/index.css @theme)
+- Autoprefixer + PostCSS are installed as Vite/Tailwind toolchain, not a separate design system
+- State: Zustand 5.0.15 (persist used for auth user and theme)
+- HTTP: Axios 1.20.0
+- Icons: lucide-react 1.47.0
+- Class helpers installed but unused in source: clsx, tailwind-merge
+- Motion installed but unused in source: framer-motion 13.4.0
+- Data fetching lib installed but unused in source: @tanstack/react-query 5.103.1
+- No UI kit (no MUI, Chakra, shadcn, Radix, Ant, Bootstrap)
+- No chart/visualization library
+- No canvas/WebGL library
+- No form library (react-hook-form etc. not installed)
+- No toast library
+- Inter is named in CSS but never loaded from a font CDN or local font file
+
+BACKEND (DO NOT TOUCH)
+- Path: backend/
+- Node.js CommonJS
+- Express 5.2.1
+- MongoDB via Mongoose 9.10.0
+- Auth: JWT (jsonwebtoken) + bcrypt password hashes
+- Uploads: multer memory storage, PDF/DOCX only, 10MB
+- Document parsers exist (pdf-parse, mammoth) but document.service.js is not required by any live backend module
+- External RAG integration via axios + form-data (backend/src/services/rag.service.js)
+- PDF reports via pdfkit
+- Security: helmet, cors, express-rate-limit, custom Mongo-operator body sanitizer
+- Default API port: process.env.PORT || 5000
+
+API ARCHITECTURE
+REST over HTTP. Frontend axios instance baseURL is:
+  import.meta.env.VITE_API_URL || "/api"
+Vite dev proxy (frontend/vite.config.ts):
+  "/api" → http://localhost:5000
+So in local dev, browser calls /api/... and Vite forwards to Express /api/...
+
+Envelope used by JSON endpoints:
+  { success: boolean, message?: string, data?: ..., errors?: ... }
+
+Auth header:
+  Authorization: Bearer <token>
+
+AUTHENTICATION MECHANISM
+- Register/Login return { token, user: { id, name, email, role } } inside data.
+- Frontend stores JWT in localStorage key "bis_auth_token" (frontend/src/services/api.ts).
+- Frontend persists user object in Zustand persist key "bis-auth-user".
+- Axios request interceptor attaches the Bearer token.
+- Axios response interceptor clears the token on HTTP 401. It does NOT clear the Zustand user.
+- Route guards in frontend/src/routes/AppRoutes.tsx:
+  - ProtectedRoute: if missing token OR missing user → Navigate to /login
+  - PublicRoute: if token AND user exist → Navigate to /
+- JWT is signed with { id, role }, expires in 7 days (backend/src/services/auth.service.js).
+- No refresh-token flow. No OAuth. No cookies.
+
+DATABASE
+MongoDB collections via Mongoose models:
+- User: name, email, password, role, timestamps
+- RecommendationHistory: user, query, language, hasDocument, ragResponse (Mixed), timestamps
+
+EXTERNAL INTEGRATION
+Backend RAG client:
+- Text query: POST {RAG_API_URL}/recommend/llm (application/x-www-form-urlencoded: query, limit)
+- Tender file: POST {RAG_API_URL}/recommend/llm/tender (multipart: file, optional query, limit)
+- Timeout: RAG_TIMEOUT_MS = 1,200,000 ms (20 minutes)
+- RAG_API_KEY is loaded in backend/src/config/env.js and backend/src/config/rag.js but is NOT sent in rag.service.js request headers.
+
+INSTALLED BUT UNUSED FRONTEND DEPENDENCIES
+Confirmed unused in frontend/src:
+- framer-motion
+- @tanstack/react-query (no QueryClientProvider anywhere)
+- clsx
+- tailwind-merge
+
+INSTALLED AND USED FRONTEND DEPENDENCIES
+- react, react-dom
+- react-router-dom
+- axios
+- zustand
+- lucide-react
+- tailwindcss / @tailwindcss/vite (dev)
+
+==================================================
+SECTION 2 — FRONTEND ARCHITECTURE
+==================================================
+
+DIRECTORY MAP (actual files)
+
+frontend/
+  index.html                         HTML shell, title "frontend", favicon /favicon.svg
+  vite.config.ts                     Vite + React + Tailwind plugin, @ alias, /api proxy
+  package.json                       Scripts and dependencies
+  tsconfig.json / tsconfig.app.json / tsconfig.node.json
+  eslint.config.js
+  README.md                          Leftover Vite template README, not product docs
+  public/
+    bis-logo.png                     Official BIS emblem used by Sidebar and Home (~47.6 KB)
+    favicon.svg                      Leftover Vite purple logo
+    icons.svg                        Leftover Vite social/docs sprite; not referenced
+  src/
+    main.tsx                         React mount; imports index.css only
+    App.tsx                          Theme apply + BrowserRouter + AppRoutes
+    App.css                          Leftover Vite starter CSS; NOT imported
+    index.css                        Tailwind import, @theme tokens, dark-mode overrides
+    assets/
+      hero.png                       Rashtrapati Bhavan line-art background (~1.21 MB)
+      react.svg                      Unused Vite leftover
+      vite.svg                       Unused Vite leftover
+    routes/AppRoutes.tsx             Only router + auth guards
+    pages/Login.tsx
+    pages/Register.tsx
+    pages/Home.tsx                   Main app shell + empty / loading / results
+    pages/Settings.tsx               Standalone settings (no Sidebar)
+    components/sidebar/Sidebar.tsx
+    components/layout/TopBar.tsx
+    components/composer/Composer.tsx
+    components/recommendations/RecommendationCard.tsx
+    components/recommendations/TenderRequirements.tsx
+    hooks/useAuth.ts
+    hooks/useRecommendations.ts
+    hooks/useHistory.ts
+    services/api.ts
+    services/auth.api.ts
+    services/recommendation.api.ts
+    services/history.api.ts
+    services/report.api.ts
+    store/authStore.ts
+    store/themeStore.ts
+    store/recommendationStore.ts
+    store/uiStore.ts                 Defined; never imported by any page/component
+    types/api.ts
+    types/recommendation.ts
+    types/history.ts
+    types/chat.ts                    Defined; never imported by any page/component
+
+ENTRY POINT
+1. frontend/index.html → #root + /src/main.tsx
+2. frontend/src/main.tsx → index.css + App
+3. frontend/src/App.tsx → applyTheme() then BrowserRouter → AppRoutes
+
+ROUTING SYSTEM
+File: frontend/src/routes/AppRoutes.tsx
+Routes (complete; do not invent more):
+- /login      PublicRoute → Login
+- /register   PublicRoute → Register
+- /           ProtectedRoute → Home
+- /settings   ProtectedRoute → Settings
+- *           Navigate to /
+
+There is no nested layout route. Home owns Sidebar+TopBar. Settings is a separate full page.
+
+LAYOUT COMPONENTS
+- Sidebar.tsx is the only left navigation.
+- TopBar.tsx is the only top chrome (theme switch + user menu).
+- There is no shared AppLayout, Footer component, or mobile nav component.
+- Home inlines a small footer: "Standards Build a Safer, Stronger India" / "Government of India".
+
+PAGES
+- Login
+- Register
+- Home (empty / loading / results are states of one page, not separate routes)
+- Settings
+
+MAJOR / REUSABLE COMPONENTS
+- Composer: query input + PDF/DOCX attach + submit/stop
+- RecommendationCard: one Indian Standard result, with always-visible summary + collapsible sections
+- TenderRequirements: extracted tender fields
+- Sidebar history grouping (Today / Yesterday / Previous 7 days / Older)
+- TopBar user dropdown (not a portal modal)
+
+HOOKS
+- useAuth: login/register/logout wrappers around auth.api + authStore
+- useRecommendations: generate/stop/clear around recommendation.api + recommendationStore; AbortController
+- useHistory: fetchHistory on mount; returns items/loading/error/refresh
+
+CONTEXTS / STATE
+No React Context providers except what libraries would add (none are mounted).
+Zustand stores:
+- authStore: user | setUser | clearUser; persist name "bis-auth-user"
+- themeStore: theme "light"|"dark"; persist name "bis-theme"; toggles document.documentElement class "dark"
+- recommendationStore: result, historyId; not persisted
+- uiStore: sidebarOpen, darkMode — UNUSED. Real theme is themeStore. Sidebar is always open.
+
+SERVICES / API CLIENTS
+- api.ts: axios instance, token helpers, toFriendlyError, interceptors
+- auth.api.ts: POST /auth/register, POST /auth/login; stores token
+- recommendation.api.ts: POST /recommendations JSON or FormData
+- history.api.ts: GET /recommendations/history + unused deleteHistory()
+- report.api.ts: POST /reports { historyId } as blob
+
+FRONTEND UTILITIES
+No src/utils folder. Shared helpers live in api.ts (toFriendlyError, token) and small local helpers inside Sidebar / RecommendationCard / TenderRequirements / history.api.ts.
+
+ASSETS
+- /bis-logo.png (public) — official BIS mark; must remain recognizable
+- @/assets/hero.png — pale government-building illustration, used as Home atmospheric background
+- Leftover Vite graphics should not be treated as product branding
+
+STYLES / THEME
+Single design-system file: frontend/src/index.css
+@theme tokens:
+- --color-bis-navy: #12294a
+- --color-bis-blue: #2f6fe4
+- --color-bis-blue-dark: #1e4fb0
+- --color-bis-blue-soft: #eaf1fd
+- --color-bis-blue-mist: #f4f8fe
+- --color-surface-light: #ffffff
+- --color-surface-light-alt: #f6f9fe
+- --color-surface-dark: #111827
+- --color-surface-dark-alt: #1a2333
+- --color-border-light: #e2e8f5
+- --color-border-dark: #2b3546
+- --font-sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif
+Dark mode is mostly a large block of html.dark { ... !important } overrides that rewrite Tailwind utility colors. This is fragile. Redesign should replace this with first-class dark tokens, not add more !important maps.
+
+Class shadow-card is used in several components but is NOT defined in @theme. Only html.dark .shadow-card has a box-shadow. In light mode shadow-card currently does almost nothing.
+
+FILE-BY-FILE GUIDE
+
+FILE PATH
+frontend/index.html
+PURPOSE
+Document shell, lang="en", viewport, favicon, title, #root.
+IMPORTANT COMPONENTS/FUNCTIONS
+None.
+SAFE TO MODIFY FOR UI? YES
+REASON
+Visual/document metadata only. Safe to change title, font links, favicon. Do not change the #root mount or the /src/main.tsx script path.
+
+FILE PATH
+frontend/src/main.tsx
+PURPOSE
+React 19 createRoot mount.
+IMPORTANT COMPONENTS/FUNCTIONS
+createRoot(...).render(StrictMode > App)
+SAFE TO MODIFY FOR UI? MODIFY WITH CAUTION
+REASON
+May import global CSS. Do not change the mount target. Do not add providers that alter data fetching/auth unless they are purely visual. Do not wrap with QueryClient unless you keep current fetch behavior identical.
+
+FILE PATH
+frontend/src/App.tsx
+PURPOSE
+Applies persisted theme class; hosts BrowserRouter.
+IMPORTANT COMPONENTS/FUNCTIONS
+useThemeStore.applyTheme; BrowserRouter; AppRoutes
+SAFE TO MODIFY FOR UI? MODIFY WITH CAUTION
+REASON
+ClassName wrappers / global motion root are OK. Do not remove theme apply. Do not replace BrowserRouter routing behavior.
+
+FILE PATH
+frontend/src/index.css
+PURPOSE
+The entire current design system + dark-mode engine.
+IMPORTANT COMPONENTS/FUNCTIONS
+@theme tokens; html/body/#root height; html.dark overrides
+SAFE TO MODIFY FOR UI? YES
+REASON
+This is the primary safe visual file. Keep the Tailwind v4 @import and @custom-variant dark (&:where(.dark, .dark *)) unless you also update themeStore (which toggles class "dark" on <html>).
+
+FILE PATH
+frontend/src/App.css
+PURPOSE
+Unused Vite starter styles.
+IMPORTANT COMPONENTS/FUNCTIONS
+.hero, .counter, #next-steps leftover
+SAFE TO MODIFY FOR UI? YES
+REASON
+Not imported. Do not start using it unless you intentionally import it. Prefer index.css.
+
+FILE PATH
+frontend/src/routes/AppRoutes.tsx
+PURPOSE
+Route table and auth gates.
+IMPORTANT COMPONENTS/FUNCTIONS
+ProtectedRoute, PublicRoute, Routes for /login /register / /settings *
+SAFE TO MODIFY FOR UI? NO
+REASON
+Changing paths, guards, or redirect targets breaks the product. A visual layout route is only safe if paths and guard logic stay identical.
+
+FILE PATH
+frontend/src/pages/Login.tsx
+PURPOSE
+Email/password sign-in form.
+IMPORTANT COMPONENTS/FUNCTIONS
+handleSubmit → useAuth.login({ email, password }) → navigate("/")
+SAFE TO MODIFY FOR UI? YES, presentation only
+REASON
+Restyle markup/classes freely. Keep field names email/password, required, type=email/password, form onSubmit, error rendering, loading disabled submit, Link to /register, navigate("/") on success.
+
+FILE PATH
+frontend/src/pages/Register.tsx
+PURPOSE
+Name/email/password registration form.
+IMPORTANT COMPONENTS/FUNCTIONS
+handleSubmit → useAuth.register({ name, email, password }) → navigate("/")
+SAFE TO MODIFY FOR UI? YES, presentation only
+REASON
+Keep name/email/password, password minLength={6} (backend requires >= 6), required fields, Link to /login, success navigate("/"). Backend also requires name.trim().length >= 2; frontend currently only uses required.
+
+FILE PATH
+frontend/src/pages/Home.tsx
+PURPOSE
+Authenticated workspace: empty hero, generation, results, report download.
+IMPORTANT COMPONENTS/FUNCTIONS
+handleSubmit, handleNewAnalysis, handleDownloadReport; states !result&&!loading / loading / result&&!loading
+SAFE TO MODIFY FOR UI? YES, presentation only
+REASON
+Largest visual surface. Do not change generate/stop/clear, historyId download gate, blob download filename pattern, or the three mutually exclusive states unless you preserve the same state machine.
+
+FILE PATH
+frontend/src/pages/Settings.tsx
+PURPOSE
+Read-only account fields + appearance note + sign out.
+IMPORTANT COMPONENTS/FUNCTIONS
+handleLogout → clearToken + clearUser + navigate("/login", { replace: true })
+SAFE TO MODIFY FOR UI? YES, presentation only
+REASON
+Keep displayed fields user.name / user.email / user.role. Keep logout sequence and back navigation to "/". Appearance currently only describes TopBar theme control; it does not toggle theme itself.
+
+FILE PATH
+frontend/src/components/sidebar/Sidebar.tsx
+PURPOSE
+Brand, New Analysis, history search, grouped history, settings, user chip.
+IMPORTANT COMPONENTS/FUNCTIONS
+getGroupLabel, groupHistory, formatTime, handleNewAnalysis, handleHistoryClick (setResult(item.result, item.id)), handleSettings
+SAFE TO MODIFY FOR UI? YES, presentation only
+REASON
+Restyle freely. Do not change grouping date math, search filter fields (title/subtitle), history restore (setResult + item.id), or navigation targets. Optional onSettings prop exists but Home does not pass it.
+
+FILE PATH
+frontend/src/components/layout/TopBar.tsx
+PURPOSE
+Theme switch + user menu + logout.
+IMPORTANT COMPONENTS/FUNCTIONS
+toggleTheme; handleLogout; menuOpen local state
+SAFE TO MODIFY FOR UI? YES, presentation only
+REASON
+Keep theme toggle calling themeStore.toggleTheme. Keep logout token+user clear and /login redirect. The "Account" menu item currently only closes the menu and does NOT navigate to /settings; changing that destination would be a behavior change — keep it or wire it to /settings without changing auth.
+
+FILE PATH
+frontend/src/components/composer/Composer.tsx
+PURPOSE
+The only analysis input control.
+IMPORTANT COMPONENTS/FUNCTIONS
+handleFileChange (PDF/DOCX only), removeDocument, handleSubmit, canSubmit, onStop
+SAFE TO MODIFY FOR UI? YES, presentation only
+REASON
+Keep accept list, silent reject of other types (or improve message without changing allowed types), submit rule (query.trim() OR document), hidden file input, onSubmit(query, document) signature, stop button while loading.
+
+FILE PATH
+frontend/src/components/recommendations/RecommendationCard.tsx
+PURPOSE
+Renders one Recommendation object with defensive defaults for older history records.
+IMPORTANT COMPONENTS/FUNCTIONS
+Section accordion; BooleanValue; SummaryItem; hasText/hasItems; defaults for missing nested objects
+SAFE TO MODIFY FOR UI? YES, presentation only
+REASON
+All visible fields must remain renderable. Do not assume every nested object exists. Accordion open/close is UI-only. Do not drop certification/testing/related/procurement/evidence/reason sections.
+
+FILE PATH
+frontend/src/components/recommendations/TenderRequirements.tsx
+PURPOSE
+Renders extracted tenderRequirements; returns null if all fields empty.
+IMPORTANT COMPONENTS/FUNCTIONS
+RequirementList; hasAnyRequirement early return
+SAFE TO MODIFY FOR UI? YES, presentation only
+REASON
+Keep the same field set and empty-null behavior. Do not invent fields.
+
+FILE PATH
+frontend/src/hooks/useAuth.ts
+PURPOSE
+Auth loading/error + store writes.
+IMPORTANT COMPONENTS/FUNCTIONS
+handleLogin, handleRegister, handleLogout, isAuthenticated
+SAFE TO MODIFY FOR UI? NO
+REASON
+Business/auth flow. Pages may consume loading/error; do not change request payloads or store writes.
+
+FILE PATH
+frontend/src/hooks/useRecommendations.ts
+PURPOSE
+Single-flight analysis with abort.
+IMPORTANT COMPONENTS/FUNCTIONS
+generate, stop, clear; AbortController; setResult(response, response.historyId)
+SAFE TO MODIFY FOR UI? NO
+REASON
+Core workflow. UI must keep calling generate({ query, document }), stop(), clear().
+
+FILE PATH
+frontend/src/hooks/useHistory.ts
+PURPOSE
+Loads last analyses for Sidebar.
+IMPORTANT COMPONENTS/FUNCTIONS
+loadHistory / refresh; fetchHistory()
+SAFE TO MODIFY FOR UI? NO
+REASON
+Data hook. Sidebar may call refresh(); do not change fetch or item shape.
+
+FILE PATH
+frontend/src/services/api.ts
+PURPOSE
+Axios client, token, error mapping, 401 handling.
+IMPORTANT COMPONENTS/FUNCTIONS
+api, getToken, setToken, clearToken, toFriendlyError, interceptors
+SAFE TO MODIFY FOR UI? NO
+REASON
+Auth + API contract + timeout 60000. Error copy is user-facing but changing status mapping can hide real failures.
+
+FILE PATH
+frontend/src/services/auth.api.ts
+PURPOSE
+Register/login HTTP + setToken.
+SAFE TO MODIFY FOR UI? NO
+
+FILE PATH
+frontend/src/services/recommendation.api.ts
+PURPOSE
+POST /recommendations as JSON { query, limit: 5 } or FormData (query?, document, limit=5) with AbortSignal.
+SAFE TO MODIFY FOR UI? NO
+REASON
+limit: 5 is hardcoded. Field name must remain "document".
+
+FILE PATH
+frontend/src/services/history.api.ts
+PURPOSE
+GET history, normalize ragResponse into RecommendationResponse, map HistoryItem. Also exports unused deleteHistory().
+SAFE TO MODIFY FOR UI? NO
+REASON
+Contains important backward-compatible normalization for old Mongo records. Breaking this breaks Sidebar restore.
+
+FILE PATH
+frontend/src/services/report.api.ts
+PURPOSE
+POST /reports { historyId } responseType blob.
+SAFE TO MODIFY FOR UI? NO
+
+FILE PATH
+frontend/src/store/authStore.ts
+PURPOSE
+Persisted user.
+SAFE TO MODIFY FOR UI? NO
+REASON
+Persist key "bis-auth-user" and user shape are load-bearing for route guards.
+
+FILE PATH
+frontend/src/store/themeStore.ts
+PURPOSE
+Persisted light/dark; toggles html.dark.
+SAFE TO MODIFY FOR UI? MODIFY WITH CAUTION
+REASON
+You may add visual tokens, but keep persist key "bis-theme", theme union, and the "dark" class contract.
+
+FILE PATH
+frontend/src/store/recommendationStore.ts
+PURPOSE
+In-memory result + historyId used by download and history restore.
+SAFE TO MODIFY FOR UI? NO
+
+FILE PATH
+frontend/src/store/uiStore.ts
+PURPOSE
+Dead store (sidebarOpen/darkMode unused).
+SAFE TO MODIFY FOR UI? MODIFY WITH CAUTION
+REASON
+Safe to start using for a collapsible sidebar IF you do not replace themeStore and you default to current always-open desktop behavior. Do not wire darkMode here as a second theme source.
+
+FILE PATH
+frontend/src/types/*.ts
+PURPOSE
+API and UI TypeScript contracts.
+SAFE TO MODIFY FOR UI? NO
+REASON
+These describe server payloads. Adding optional UI-only types is acceptable; changing required fields is not.
+
+FILE PATH
+frontend/vite.config.ts
+PURPOSE
+Build tool, alias, proxy.
+SAFE TO MODIFY FOR UI? NO
+REASON
+Proxy and @ alias are runtime/dev contracts. Do not change proxy target.
+
+FILE PATH
+frontend/public/bis-logo.png
+PURPOSE
+Official BIS emblem.
+SAFE TO MODIFY FOR UI? MODIFY WITH CAUTION
+REASON
+You may change how it is framed, not replace it with a unofficial mark. Public URL /bis-logo.png is hardcoded in Sidebar and Home.
+
+FILE PATH
+frontend/src/assets/hero.png
+PURPOSE
+Home atmospheric background.
+SAFE TO MODIFY FOR UI? YES
+REASON
+Visual asset. It is 1.21 MB; replacing/compressing is a UI performance win. Keep the import in Home or restyle without it.
+
+==================================================
+SECTION 3 — PAGE INVENTORY
+==================================================
+
+----------------------------------------
+Route: /login
+Page name: Login
+Purpose: Authenticate an existing user and enter Home.
+Main components: Page-local form only. No shared layout, no Sidebar, no TopBar, no logo image.
+Important data displayed: Title "BIS Recommendation Engine"; email; password; error string; submit loading label "Signing in..."; link to register.
+API calls used:
+- POST /api/auth/login via useAuth → auth.api.login
+  body: { email, password }
+  success: data.data = { token, user }
+User interactions:
+- Type email/password
+- Submit
+- Click "Create an account" → /register
+- On success → navigate("/")
+Current visual structure:
+- Full-viewport centered card
+- Background bg-bis-blue-mist
+- max-w-md white rounded-2xl p-8 shadow-card
+- Stacked labels + inputs + full-width blue button
+Current strengths:
+- Clear, simple, low cognitive load
+- Native required/email validation
+- Error and loading states exist
+Current visual weaknesses:
+- Generic SaaS card; no BIS logo, no cinematic atmosphere, no government-tech identity
+- Title is generic "frontend" in the tab
+- No dark: classes; depends on global !important overrides
+- No focus-visible ring beyond focus:border-bis-blue
+- No show-password control
+- Auth 400 validation errors from backend are { errors: { field: message } }, but toFriendlyError maps ALL 400s to "Please provide a query or a tender document to analyze." So login validation failures can show the wrong sentence. Do not "fix" api.ts unless asked; UI can still show the hook error string as-is.
+UI-only files/components that can safely be changed:
+- frontend/src/pages/Login.tsx
+- frontend/src/index.css
+- frontend/index.html (title/fonts)
+Files that should NOT be touched:
+- frontend/src/hooks/useAuth.ts
+- frontend/src/services/auth.api.ts
+- frontend/src/services/api.ts
+- frontend/src/store/authStore.ts
+- frontend/src/routes/AppRoutes.tsx
+- entire backend/
+
+----------------------------------------
+Route: /register
+Page name: Register
+Purpose: Create an account, persist token+user, enter Home.
+Main components: Page-local form only.
+Important data displayed: "Create Account"; name; email; password (minLength 6); error; loading "Creating account..."; link to login.
+API calls used:
+- POST /api/auth/register via useAuth → auth.api.register
+  body: { name, email, password }
+  success 201: data.data = { token, user }
+User interactions:
+- Fill name/email/password
+- Submit
+- Navigate to /login
+- Success → navigate("/")
+Current visual structure: Same centered-card pattern as Login.
+Current strengths: Matches Login; password minLength aligns with backend (>=6).
+Current visual weaknesses: Same generic card as Login; no logo; no password rules helper text for backend name>=2; duplicate visual language with no brand moment.
+UI-only files/components that can safely be changed:
+- frontend/src/pages/Register.tsx
+- frontend/src/index.css
+- frontend/index.html
+Files that should NOT be touched:
+- useAuth, auth.api, api.ts, authStore, AppRoutes, backend
+
+----------------------------------------
+Route: /
+Page name: Home (BIS Procurement Assistant)
+Purpose: The entire product surface after login. Three exclusive visual states in one route.
+Main components:
+- Sidebar
+- TopBar
+- Composer (empty state only)
+- RecommendationCard (results)
+- TenderRequirements (results, if data)
+- Inline loading transcript
+- Inline footer
+Important data displayed:
+Empty: BIS logo, H1, supporting copy, composer, optional error
+Loading: user bubble (query + fileName), assistant "Analyzing" status, bounce dots, Stop, optional error
+Results:
+- count of recommendations
+- Download Report (needs historyId)
+- result.query
+- result.summary
+- result.tenderRequirements
+- result.recommendations[]
+- result.warnings[]
+- New Analysis
+API calls used:
+- POST /api/recommendations (JSON or multipart) via useRecommendations.generate
+- POST /api/reports { historyId } via downloadRecommendationReport
+- Indirect: Sidebar GET /api/recommendations/history via useHistory
+User interactions:
+- Type query
+- Attach PDF/DOCX
+- Submit
+- Stop generation
+- Expand/collapse card sections
+- Download PDF
+- New Analysis
+- Sidebar search / select history / settings
+- Theme toggle / logout in TopBar
+Current visual structure:
+- flex h-screen; Sidebar w-84.5; main scroll
+- Fixed faint hero.png in the main pane only (left-84.5)
+- Centered max-w-4xl empty, max-w-3xl loading, max-w-5xl results
+- ChatGPT-like right-aligned blue user chip during load
+- Stacked result sections, not a dashboard grid
+Current strengths:
+- Clear three-state workflow
+- Real BIS branding and government tagline
+- Results are information-dense and structured
+- Stop and download affordances exist
+Current visual weaknesses:
+- Light government-portal look, not cinematic
+- Sidebar never collapses; no mobile drawer
+- Composer disappears after submit (cannot refine in-place; New Analysis is the only return)
+- History does not auto-refresh after a new analysis (useHistory runs once on mount)
+- 1.21 MB background image at 40% / 14% opacity is expensive for little impact
+- Results feel like stacked admin cards, not an editorial reveal
+- Duplicate "reason" text appears as "Why this standard is recommended" and again under "Standard scope"
+- left-84.5 is hard-coupled to Sidebar width
+UI-only files/components that can safely be changed:
+- frontend/src/pages/Home.tsx
+- Sidebar.tsx, TopBar.tsx, Composer.tsx, RecommendationCard.tsx, TenderRequirements.tsx
+- index.css, hero.png presentation
+Files that should NOT be touched:
+- useRecommendations.ts, recommendation.api.ts, report.api.ts, recommendationStore.ts, history.api.ts, types, backend
+
+----------------------------------------
+Route: /settings
+Page name: Settings
+Purpose: Show account identity, point at theme control, sign out.
+Main components: Local page sections only. No Sidebar, no TopBar, no Composer.
+Important data displayed: user.name, user.email, user.role; appearance explainer; Sign out button.
+API calls used: none. Logout is localStorage + Zustand + navigate.
+User interactions:
+- Back arrow → navigate("/")
+- Sign out → clearToken, clearUser, /login replace
+Current visual structure:
+- max-w-5xl stacked rounded-2xl cards
+- Account / Appearance / Sign out
+Current strengths: Quiet, readable, obvious logout.
+Current visual weaknesses:
+- Feels like a different product (no chrome continuity)
+- Appearance card cannot change theme because TopBar is absent
+- "Account" in TopBar does not navigate here
+- No session/security copy beyond sign out
+UI-only files/components that can safely be changed:
+- frontend/src/pages/Settings.tsx
+- index.css
+Files that should NOT be touched:
+- authStore, api.clearToken, AppRoutes
+
+----------------------------------------
+Route: * (unknown)
+Page name: none
+Purpose: Redirect to /
+No UI. Do not add a 404 unless you keep unknown paths redirecting to / or you are explicitly asked to change routing (you are not).
+
+==================================================
+SECTION 4 — USER FLOW
+==================================================
+
+There is no marketing landing page. Unauthenticated entry is Login (or Register). Unknown URLs bounce to /, which then bounces to /login if unauthenticated.
+
+Landing (implied)
+→ If localStorage bis_auth_token exists AND persisted user exists: PublicRoute sends the user to /
+→ Else: user sees /login (or /register)
+
+COMPONENT: AppRoutes PublicRoute / ProtectedRoute
+API/DATA: getToken() + useAuthStore.user
+MUST REMAIN UNCHANGED: token key, persist user shape, redirect targets /login and /
+
+Login
+→ Successful login
+COMPONENT: Login.handleSubmit → useAuth.login → auth.api.login → setToken + setUser → navigate("/")
+API/DATA: POST /api/auth/login { email, password } → { success, message, data: { token, user } }
+MUST REMAIN UNCHANGED: payload fields, token persistence, user persistence, navigate to "/"
+
+Register
+→ Successful register
+COMPONENT: Register.handleSubmit → useAuth.register → POST /api/auth/register { name, email, password }
+API/DATA: 201 + same token/user envelope
+MUST REMAIN UNCHANGED: payload, min password 6, auto-login behavior, navigate to "/"
+
+Home empty state ("dashboard")
+COMPONENT: Home when !result && !loading; Sidebar + TopBar + Composer
+API/DATA: Sidebar useHistory → GET /api/recommendations/history (last 20, newest first)
+MUST REMAIN UNCHANGED: history item id is Mongo _id; clicking history must call setResult(item.result, item.id) and must NOT call POST /recommendations again
+
+Project / analysis input
+COMPONENT: Composer
+API/DATA: none until submit. Local File + query string.
+MUST REMAIN UNCHANGED:
+- Allowed types: application/pdf and the DOCX OpenXML MIME; accept=".pdf,.docx,..."
+- Submit requires query.trim() OR a file
+- onSubmit(trimmedQuery, file|null)
+
+Analysis
+COMPONENT: Home.handleSubmit sets activeRequest then useRecommendations.generate
+API/DATA:
+- Text only: POST /api/recommendations JSON { query, limit: 5 }
+- File: FormData fields query? + document + limit="5"
+- Header Authorization Bearer
+- AbortSignal from AbortController
+Backend then:
+- Optional multer file
+- processRecommendationRequest → rag.service → RecommendationHistory.create → returns ragResponse + historyId
+MUST REMAIN UNCHANGED: endpoint, field names, limit 5, abort/stop, single-flight "An analysis is already running.", historyId stored on success
+
+Stop
+COMPONENT: Home Stop button and Composer onStop → useRecommendations.stop → abort()
+API/DATA: request canceled; toFriendlyError returns "Generation stopped." and hook does not set that as error
+MUST REMAIN UNCHANGED: abort behavior and the ignored "Generation stopped." message
+
+Results
+COMPONENT: Home result branch; TenderRequirements; RecommendationCard list
+API/DATA: recommendationStore.result and .historyId (from POST response or history restore)
+MUST REMAIN UNCHANGED: render from real result object; no fake cards; empty recommendations array still shows the empty message
+
+Reports
+COMPONENT: Home.handleDownloadReport
+API/DATA: POST /api/reports { historyId } blob; download name `BIS-Recommendation-Report-${historyId}.pdf`
+MUST REMAIN UNCHANGED: historyId source, blob download, disabled when !historyId, error string path
+
+New Analysis
+COMPONENT: Home.handleNewAnalysis and Sidebar.handleNewAnalysis
+API/DATA: clear() / clearResult(); no API
+MUST REMAIN UNCHANGED: must clear result + historyId so download cannot fire on a stale id
+
+History restore
+COMPONENT: Sidebar.handleHistoryClick
+API/DATA: no recommendation POST; setResult(saved ragResponse, item.id)
+MUST REMAIN UNCHANGED: restore uses item.id as historyId so Download Report still works
+
+Settings
+COMPONENT: Sidebar Settings → navigate("/settings"); Settings back → "/"
+API/DATA: none
+MUST REMAIN UNCHANGED: route /settings still protected
+
+Logout
+COMPONENT: TopBar.handleLogout and Settings.handleLogout
+API/DATA: clearToken(); clearUser(); navigate("/login", { replace: true })
+MUST REMAIN UNCHANGED: both stores must be cleared or ProtectedRoute/PublicRoute can desync
+
+Linear map:
+
+  /login or /register
+    → /
+      → Composer submit
+        → loading state
+          → results
+            → Download Report
+            → New Analysis → empty Home
+      → Sidebar history item → results (restored)
+      → /settings → back / or sign out → /login
+
+==================================================
+SECTION 5 — CURRENT UI/UX AUDIT
+==================================================
+
+VISUAL HIERARCHY
+Headings:
+- Login H1 3xl bold navy
+- Home empty H1 3xl/4xl semibold
+- Results H1 2xl/3xl bold "Indian Standards Recommendations"
+- Card titles xl bold
+- Sidebar brand is 12px bold caps — visually weaker than it should be for a government product
+Typography:
+- Intended Inter, actually system stack
+- Body is mostly text-sm leading-6 slate-500/700
+- Heavy use of uppercase 11–12px tracking-wide labels
+Spacing:
+- Cards use p-4/p-5/p-6 and space-y-4/5
+- Home empty state has generous vertical centering
+- Results are tighter and long
+Density:
+- Empty state is sparse
+- RecommendationCard is very dense (good for data, poor for cinematic scanning)
+Information hierarchy:
+- Standard number (blue) then title (navy) is correct
+- Too many equal-weight gray labels compete
+- Footer slogan is 11px and easy to miss
+- No page-level visual climax except the empty-state logo
+
+COLOR
+Background:
+- Light body #f4f8fe (bis-blue-mist); Home main is white / slate-950
+- Dark body #0b1220
+Primary:
+- bis-blue #2f6fe4, hover #1e4fb0
+- bis-navy #12294a
+Accent:
+- Soft blue chips #eaf1fd
+- Semantic: red-50/600 errors and stop; amber-50 warnings; emerald-600 boolean Yes
+Dark palette is slate/navy, not a designed cinematic ramp
+Global !important dark overrides fight component-level dark: classes
+
+LAYOUT
+- Desktop: 338px-ish sidebar (w-84.5) + fluid main
+- No CSS grid page framework
+- Cards are stacked, 1-column results
+- TenderRequirements uses md:grid-cols-2
+- Recommendation summaries use sm:grid-cols-2/3 and lg:grid-cols-4
+- Content widths 48–64rem
+- Alignment: empty/loading centered; results left-aligned in a centered column
+- Navigation: persistent left sidebar; TopBar is right-aligned only (no page title in the bar)
+- Settings breaks the shell
+
+COMPONENTS
+Buttons:
+- Primary rectangle bg-bis-blue rounded-lg
+- Composer circular 48px submit
+- Sidebar full-width New Analysis
+- Ghost/outline New Analysis on results
+- Red Sign out / Stop
+Cards:
+- rounded-2xl border + mostly-missing light shadow
+Tables: none
+Forms: native inputs, rounded-lg, border-border-light
+Charts: none
+Modals: none; TopBar uses an absolute dropdown
+Navigation: sidebar list buttons
+Badges: rounded-full applicability/relevance/count
+Alerts: colored rounded boxes, not a toast system
+Loading: Loader2 spin, bounce dots, pulse pip, "Analyzing"
+Empty: sidebar MessageSquare + "No analyses yet."; results empty card if 0 standards
+
+INTERACTION
+Hover:
+- Buttons darken; history rows hover:bg-slate-50
+- Composer attach hover:bg-slate-100
+Active:
+- Selected history bg-bis-blue-soft
+- Theme switch knob
+Loading:
+- Exists and is understandable
+- Composer also shows a second "Analyzing..." line, but Composer is not mounted during Home loading state, so that Composer loading row is currently unused in the main flow
+Transitions:
+- Theme 180ms on body
+- Chevron rotate
+- Few others; framer-motion unused
+Feedback:
+- Inline error boxes
+- Silent file-type rejection (invalid files do nothing)
+- Report error string
+- No toasts, no success celebration
+
+RESPONSIVENESS
+Desktop: designed for this. Sidebar + hero offset assume a wide screen.
+Laptop: usable if width > ~1100px.
+Tablet: Sidebar w-84.5 + main will crush; no hamburger; uiStore.sidebarOpen unused.
+Mobile:
+- Login/Register OK
+- Home is not mobile-ready (fixed sidebar, left-84.5 hero, TopBar px-8)
+- Settings is acceptable
+- Composer pill can overflow on very small widths
+No dedicated breakpoints hide/collapse the sidebar.
+
+ACCESSIBILITY
+- Login/Register labels are associated via htmlFor
+- Composer file/submit/stop have aria-labels
+- Theme switch has aria-label/title
+- User menu has aria-expanded and role="menu"
+- Sidebar search has placeholder only, no <label>
+- Home decorative hero has aria-hidden and empty alt
+- Contrast: slate-400 labels on white are weak; dark-mode slate-500 on #0b1220 is also soft
+- Focus: few focus-visible outlines; composer uses focus-within border
+- Keyboard: dropdown does not close on outside click or Escape; no focus trap; Account item is a no-op
+- Semantic: RecommendationCard uses <article>; TenderRequirements uses <section>; Sidebar uses <aside>; Home footer is <footer>
+- html lang="en" is set
+- No skip link
+
+PERFORMANCE
+- hero.png is 1,207,641 bytes for a low-opacity wash
+- No srcset/lazy
+- Dark mode CSS is a large !important override sheet
+- Recommendation lists are not virtualized (usually small; backend history limit 20; recommendation limit 5)
+- No WebGL now
+- Unnecessary rerender risk: Home holds local activeRequest/download state; acceptable
+- Animation risk if a redesign adds particles/WebGL on the analysis page while a 60s–20min request is in flight
+- Axios timeout 60s vs RAG timeout 20 min: long analyses can surface as network/504-style errors. Do not "fix" timeouts in a UI redesign.
+
+==================================================
+SECTION 6 — UI DESIGN TRANSFORMATION OPPORTUNITIES
+==================================================
+
+Inspiration principles from cinematic creative-technology sites (including the visual language associated with activetheory.net/work), WITHOUT copying that site, its 3D scenes, its case-study grid, or its branding:
+
+- Cinematic dark interface
+- Sophisticated typography (display + precise labels)
+- Strong visual hierarchy
+- Atmospheric gradients
+- Subtle glow
+- Layered surfaces
+- Controlled glass/transparency
+- Elegant motion
+- Immersive hero
+- Editorial composition
+- Premium micro-interactions
+- Refined transitions
+- Depth without clutter
+
+This product must still feel like a Government of India / BIS tool: trustworthy, official, readable. Cinematic ≠ playful. Do not turn it into a game, a 3D portfolio, or an unreadable glass jungle.
+
+----------------------------------------
+PAGE: Login
+What should visually change:
+- Full-viewport dark atmospheric stage instead of a floating generic card on pale blue
+- BIS emblem as a hero mark
+- Display typography for product name; quiet supporting line
+- Glass or layered panel for the form, not a flat white box
+- Soft gradient/glow behind the panel; no particle circus
+What should remain:
+- email/password/submit/error/loading/register link
+Which existing components could be restyled:
+- The page itself is the component
+Which could be recomposed:
+- Split cinematic left brand pane + right form on desktop; stacked on mobile
+Where motion could be introduced:
+- Panel fade/rise 400–700ms once; input focus glow; button hover
+Where visual effects should NOT be used:
+- No WebGL/audio. No looping 3D. Do not obscure inputs with blur.
+
+----------------------------------------
+PAGE: Register
+Same system as Login so they feel like one product.
+Keep name field and password minLength.
+Do not add extra profile fields that the API does not accept.
+
+----------------------------------------
+PAGE: Home empty state
+What should visually change:
+- Treat this as the immersive hero: large title, restrained subtitle, composer as a glowing instrument
+- Dark cinematic default-friendly surface that still works in light mode
+- Hero image as a deep etched underlayer or replace with CSS gradient atmosphere (hero.png is weak at 40% opacity and costs 1.2MB)
+- Logo mark should feel engraved, not a white circle sticker
+What should remain:
+- Composer function, error box, Sidebar, TopBar, footer slogan if desired
+Which existing components could be restyled:
+- Composer, Sidebar, TopBar, Home hero block
+Which could be recomposed:
+- Composer can sit lower like a command altar; brand can become editorial left/center
+Where motion could be introduced:
+- Title letter-spacing/opacity entrance; composer focus expansion; history row hover
+Where visual effects should NOT be used:
+- No continuous full-screen animation behind a form the user must type into
+- Do not animate the government logo in a gimmicky way
+
+----------------------------------------
+PAGE: Home loading
+What should visually change:
+- Keep the "request sent" narrative but make it cinematic: measured pulse, thin progress atmosphere, not three cartoon bounce dots
+- User query chip can become a glass quote, not a bright chat bubble
+What should remain:
+- Stop, query/fileName display, error
+Where motion could be introduced:
+- Slow shimmer / breathing glow (12–20s loop max, low CPU)
+Where visual effects should NOT be used:
+- No heavy canvas while waiting on RAG; users may wait a long time
+
+----------------------------------------
+PAGE: Home results
+What should visually change:
+- Editorial header: kicker, title, count, download as a precision tool
+- Summary as a featured pull-quote
+- Tender analysis as a layered dossier
+- Recommendation cards as numbered editorial entries with glow only on hover/focus
+What should remain:
+- Every data field, accordion contents, warnings, empty-zero state, New Analysis, download disabled rules
+Which existing components could be restyled:
+- RecommendationCard, TenderRequirements, warning box, count pill
+Which could be recomposed:
+- Sticky results header; two-column desktop (summary/tender | cards) ONLY if all content remains available and readable
+Where motion could be introduced:
+- Stagger card entrance (max ~5 items); accordion height; download spinner already exists
+Where visual effects should NOT be used:
+- Do not glass-blur long reading text
+- Do not hide warnings
+- Do not add fake charts; there is no chart data API
+
+----------------------------------------
+PAGE: Settings
+What should visually change:
+- Reuse Home shell visually (same background language) even if you do not mount Sidebar, OR keep a slim cinematic top bar so it does not feel like a different app
+- Account as an identity plaque; danger zone for sign out
+What should remain:
+- Fields and logout
+Where motion could be introduced:
+- Card entrance only
+Where visual effects should NOT be used:
+- No decorative noise on a legal-feeling account page
+
+----------------------------------------
+CHROME: Sidebar / TopBar
+What should visually change:
+- Sidebar as a dark glass rail with engraved brand
+- History rows as quiet editorial items; selected state = thin luminous edge, not a flat blue fill
+- TopBar as floating glass, not empty right-aligned whitespace
+What should remain:
+- New Analysis, search, grouping, restore, settings, user chip, theme toggle, logout
+Where visual effects should NOT be used:
+- Do not virtualize/hide history in a way that breaks click restore
+- Do not replace search with a new API
+
+==================================================
+SECTION 7 — COMPONENT REDESIGN MAP
+==================================================
+
+CURRENT COMPONENT → RECOMMENDED VISUAL TREATMENT → SAFE TO MODIFY? → FUNCTIONALITY THAT MUST REMAIN
+
+Navbar (TopBar.tsx)
+→ Floating/glass header, refined theme switch, richer but still compact user menu
+→ YES
+→ toggleTheme; logout clears token+user and goes to /login; display name/email/role; menu open state
+
+Sidebar (Sidebar.tsx)
+→ Cinematic rail, engraved BIS brand, luminous New Analysis, quieter history typography, selected luminosity
+→ YES (visual)
+→ New Analysis clears result and navigates /; search filters title/subtitle; date groups; history click setResult(result, id)+navigate(/); Settings → /settings; show user name/email/initial
+
+Header (Home results header + Settings header)
+→ Editorial kicker + display title + tool cluster
+→ YES
+→ Download still needs historyId; New Analysis / back still navigate/clear as today
+
+Hero (Home empty + Login brand)
+→ Immersive but readable; logo + one line of purpose + composer/form as the focal instrument
+→ YES
+→ Composer/login actions unchanged
+
+Cards (RecommendationCard, TenderRequirements, Settings sections, Login/Register panel)
+→ Layered surfaces, 1px luminous border, tight inner hierarchy, hover lift of 2–4px max
+→ YES
+→ All fields, null-safe rendering, accordion behavior, Settings values
+
+Metric / KPI
+→ There are no dedicated KPI components. The closest is the standards count pill and Boolean Yes/No tiles.
+→ YES to restyle those
+→ Count must stay result.recommendations.length; booleans must stay real certification/testing/procurement flags
+
+Tables
+→ None exist. Do not introduce a table library that re-fetches data.
+→ N/A
+→ N/A
+
+Charts
+→ None exist. No numeric series in the API besides version.year and evidence.page/chunkIndex.
+→ Do NOT add a chart dependency for decoration
+→ Do not invent metrics
+
+Forms (Login, Register, Composer, Sidebar search)
+→ Dark/light tokens, larger hit targets, visible focus rings, clearer file chip
+→ YES
+→ Same fields, same submit rules, same endpoints
+
+Buttons
+→ Primary luminous blue; secondary ghost; danger restrained red; icon circles for composer
+→ YES
+→ disabled/loading labels and handlers stay
+
+Inputs
+→ Inset dark fields, placeholder muted, focus glow, labeled
+→ YES
+→ Controlled values and names stay
+
+Modals
+→ Only the TopBar dropdown. May become a real menu/popover visually
+→ YES
+→ Logout and (if kept) Account item; do not add auth-blocking modals
+
+Notifications
+→ No toast system. Errors are inline boxes.
+→ YES to restyle inline alerts
+→ Do not drop error strings. Do not add a toast library that swallows hook errors.
+
+Loading states
+→ Replace bounce dots with a refined pulse/shimmer; keep copy
+→ YES
+→ Stop must remain available; generate still single-flight
+
+Empty states
+→ More art-directed empty history and zero-recommendations, still honest
+→ YES
+→ Copy can be refined; do not fake sample standards
+
+Error states
+→ Sharper but calm error panels
+→ YES
+→ Render {error} / {reportError} text from existing state
+
+Footer (inline in Home)
+→ Thin engraved government line; optional
+→ YES
+→ Not load-bearing. Do not add backend credits that imply extra integrations.
+
+==================================================
+SECTION 8 — DESIGN SYSTEM RECOMMENDATION
+==================================================
+
+Goal: one cinematic-government system that works in both themeStore modes, with dark as the hero theme for judges and a dignified light theme for actual procurement use.
+
+TYPOGRAPHY
+Font direction:
+- Load Inter (already named) OR a pairing:
+  - Display: "Syne" or "Instrument Serif" or "Newsreader" for 1–2 hero words only
+  - UI/body: Inter
+- Minimum new fonts: 1 family if possible. Prefer adding an Inter Google/fontsource link in index.html over a new npm font package.
+- Do not add more than two families.
+
+Heading hierarchy:
+- Display H1 empty/login: 40–56px, tight tracking, semibold/medium (not black)
+- Page H1 results/settings: 28–36px
+- Card title: 18–22px
+- Section: 14–16px semibold
+
+Body hierarchy:
+- Body: 14–16px, line-height 1.6
+- Compact UI: 13px
+- Micro: 11–12px
+
+Label style:
+- 11px, uppercase or small-caps, letter-spacing 0.12–0.16em, muted, not bold-on-bold
+
+COLORS (recommended tokens to put in @theme; map old bis-* so existing class names can migrate gradually)
+
+Dark (cinematic default for the redesign showcase):
+- background: #070B14
+- surfaces: #0E1624 / #141C2C
+- text: #E7EEF8
+- muted text: #8B9BB0
+- borders: rgba(231,238,248,0.10)
+- accent: #3D7CFF (keep recognizably BIS blue, slightly more luminous)
+- accent-deep: #1E4FB0 (already bis-blue-dark)
+- glow: rgba(61,124,255,0.28)
+- success: #3DDC97
+- warning: #F5C16C
+- error: #F97171
+- navy residual: #9BB0D1 for secondary brand text
+
+Light (keep for themeStore "light"):
+- background: #F4F8FE (current mist)
+- surfaces: #FFFFFF / #F6F9FE
+- text: #12294A
+- muted: #5B6B80
+- borders: #E2E8F5
+- accent: #2F6FE4
+- success/warning/error: keep current emerald/amber/red meanings
+
+SPACING SCALE
+4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 / 96
+Home hero vertical padding 64–96; cards 24; compact rows 12.
+
+RADIUS
+- Controls: 10–12px
+- Cards: 16–20px (current rounded-2xl is fine)
+- Pills: 999px
+- Composer can stay pill-shaped or become a 20px capsule; do not invent a third radius language
+
+SHADOWS
+Define --shadow-card in @theme (it is missing today).
+- Light: 0 8px 30px rgba(18,41,74,0.08)
+- Dark: 0 20px 60px rgba(0,0,0,0.35), plus 0 0 0 1px rgba(255,255,255,0.06)
+- Glow only on primary CTA and focused composer: 0 0 24px rgba(47,111,228,0.25)
+No stacked drop-shadow plus blur plus border plus gradient on the same node.
+
+MOTION
+- Duration: 120–180ms hover; 240–400ms entrance; 500–800ms page/hero only
+- Easing: cubic-bezier(0.22, 1, 0.36, 1) or ease-out
+- Page transitions: fade + 8–16px rise; do not unmount auth state early
+- Hover: color/border/glow, 1.01 scale max on buttons
+- Entrance: once per page view; stagger cards 40–70ms, cap 5
+- Use already-installed framer-motion. Do not add GSAP/three/r3f unless a later explicit request.
+- Respect prefers-reduced-motion: disable stagger/glow pulse
+
+EFFECTS
+- Blur: backdrop-blur-md only on chrome (sidebar/topbar/composer). Never on long text.
+- Gradients: large, slow, low-contrast atmospheric washes, not rainbow
+- Glow: accent, 1 source per view
+- Particles: none by default
+- Optional canvas/WebGL: NOT recommended for this hackathon UI pass. Risk to performance, a11y, and form usability. If someone insists, isolate to Login idle background only, pause when hidden, no extra backend.
+
+MINIMUM ADDITIONAL DEPENDENCIES
+Prefer zero new packages.
+Reuse:
+- framer-motion (already installed, unused)
+- lucide-react
+- clsx + tailwind-merge (already installed; useful for class composition)
+- Tailwind v4 tokens in index.css
+Do NOT add:
+- @tanstack/react-query (would duplicate useHistory/useRecommendations)
+- chart.js / recharts / d3
+- three / @react-three/fiber
+- MUI / Chakra / shadcn (unless you only copy styles, not a new data layer)
+- react-hook-form (not needed; forms are 2–3 fields)
+
+Optional worth considering (only if Inter is not loaded via HTML):
+- @fontsource/inter  OR a Google Fonts <link> in index.html (no npm required)
+
+==================================================
+SECTION 9 — PROTECTED FUNCTIONALITY
+==================================================
+
+The redesign must not break any of the following.
+
+BACKEND ENDPOINTS (do not change; frontend must keep calling them)
+
+GET /
+- Health string "BIS Recommendation Engine API is running"
+- Frontend does not call this.
+
+POST /api/auth/register
+- Body: { name, email, password }
+- Validates name>=2, email regex, password>=6
+- 201 { success, message, data: { user:{id,name,email,role}, token } }
+- 400 { success:false, errors }
+- 409 Email is already registered
+- Depends: Register.tsx → useAuth.register → auth.api.register → setToken + setUser
+
+POST /api/auth/login
+- Body: { email, password }
+- 200 same data envelope
+- 401 Invalid email or password
+- Depends: Login.tsx → useAuth.login → auth.api.login
+
+POST /api/recommendations
+- Auth Bearer required
+- Rate limit: 30 / 15 min
+- JSON { query, limit } OR multipart query + document + limit
+- File: field name "document"; PDF/DOCX; 10MB
+- 400 if neither query nor file
+- 200 { success, message, data: { ...ragResponse, historyId } }
+- Depends: Composer → Home.handleSubmit → useRecommendations.generate → recommendation.api.submitRecommendation
+- Do not change limit 5, field names, or abort signal wiring
+
+GET /api/recommendations/history
+- Auth required
+- Returns up to 20 latest RecommendationHistory docs for req.user.id
+- Shape per item: _id, user, query, language, hasDocument, ragResponse, createdAt, updatedAt
+- Depends: useHistory → history.api.fetchHistory → Sidebar
+- Normalization in history.api.ts must keep working
+
+DELETE /api/recommendations/history/:id
+- Auth + ownership
+- Implemented in backend and history.api.deleteHistory
+- NOT used by any UI. Do not build a delete control that changes the API. If you add UI delete later, that is a feature, not this redesign’s job, unless explicitly requested.
+
+POST /api/reports
+- Auth required
+- Body: { historyId } valid ObjectId owned by user
+- Response: application/pdf binary, Content-Disposition attachment
+- 400/404 JSON errors
+- Depends: Home.handleDownloadReport → report.api.downloadRecommendationReport
+- Frontend expects a Blob. Do not parse as JSON.
+
+API REQUEST/RESPONSE CONTRACTS
+- Keep axios baseURL behavior (VITE_API_URL || "/api")
+- Keep Authorization header injection
+- Keep AuthApiResponse.data unwrap
+- Keep Recommendation response fields listed in frontend/src/types/recommendation.ts
+- Keep historyId on generate and restore
+- Auth 400 uses `errors` object, not `message`. Do not assume message exists.
+
+AUTHENTICATION
+- localStorage "bis_auth_token"
+- Zustand persist "bis-auth-user"
+- 7-day JWT
+- 401 interceptor clears token only
+- Login/Register must still set both token and user or the next ProtectedRoute will bounce
+
+AUTHORIZATION
+- All recommendation/history/report routes use protect middleware
+- Ownership is server-side (history user match)
+- Frontend must not strip the header or send another user’s historyId (UI just uses store/item ids)
+
+DATABASE INTERACTIONS
+- Frontend never talks to Mongo.
+- Creating history happens only inside processRecommendationRequest after RAG returns.
+- Do not add client-side fake history rows.
+
+STATE MANAGEMENT
+- authStore, themeStore persist keys
+- recommendationStore result/historyId
+- Do not persist recommendation results unless you also keep historyId accurate
+- Do not introduce a second user store
+
+ROUTING
+- Paths /login /register / /settings and * → /
+- Public vs protected gates
+- Success auth → /
+- Logout → /login replace
+- History/New Analysis → /
+
+FORM SUBMISSION BEHAVIOR
+- preventDefault on all three forms
+- Login/Register required fields
+- Register minLength 6
+- Composer blocks empty submit
+- Disabled while loading
+
+FILE UPLOADS
+- Hidden input, accept PDF/DOCX
+- Frontend MIME check
+- Backend multer + 10MB
+- FormData key "document"
+- Show file name + size chip; remove must clear input value
+
+DATA PROCESSING
+- RAG happens only on the server
+- history.api normalizeResult / unwrapRagResponse / normalizeRecommendation / normalizeTenderRequirements handle older Mixed documents
+- RecommendationCard defaults missing nested objects to {}
+- Do not replace these with optimistic fake objects
+
+CALCULATIONS
+- File size MB: (size / 1024 / 1024).toFixed(2)
+- History grouping by local midnight boundaries
+- formatTime via toLocaleTimeString
+- Standards count from array length
+- Download disabled without historyId
+- Do not add client-side scoring
+
+BUSINESS RULES
+- One analysis in flight
+- Query or document required
+- PDF/DOCX only
+- limit 5
+- History restore does not re-call RAG
+- Report only for owned historyId
+- Role is displayed, not used for ACL in UI
+- language stored as "en" server-side; no language picker exists — do not add one that posts unknown fields
+
+REAL-TIME FUNCTIONALITY
+- No websocket.
+- Only AbortController cancellation.
+- Keep stop() working.
+
+ENVIRONMENT VARIABLES
+Frontend:
+- VITE_API_URL optional; default "/api"
+- frontend/.env is gitignored
+Backend (do not change, do not commit):
+- PORT
+- MONGO_URI
+- JWT_SECRET
+- RAG_API_URL
+- RAG_API_KEY (loaded, unused in requests)
+Vite proxy target is hardcoded localhost:5000.
+
+EXTERNAL INTEGRATIONS
+- RAG HTTP API through backend only
+- Browser download of PDF
+- No other third-party frontend SDKs
+
+RATE LIMITS (UX implication only)
+- Auth: 20 / 15 min
+- Recommendations: 30 / 15 min
+- UI should still display returned message "Too many attempts..." / "Too many requests..." via default error mapping
+
+==================================================
+SECTION 10 — SAFE UI EDIT ZONES
+==================================================
+
+A. SAFE TO MODIFY
+Visual/presentation files:
+
+- frontend/index.html
+- frontend/src/index.css
+- frontend/src/App.css                    (unused leftover; optional)
+- frontend/src/pages/Login.tsx
+- frontend/src/pages/Register.tsx
+- frontend/src/pages/Home.tsx
+- frontend/src/pages/Settings.tsx
+- frontend/src/components/sidebar/Sidebar.tsx
+- frontend/src/components/layout/TopBar.tsx
+- frontend/src/components/composer/Composer.tsx
+- frontend/src/components/recommendations/RecommendationCard.tsx
+- frontend/src/components/recommendations/TenderRequirements.tsx
+- frontend/src/assets/hero.png            (replace/compress/restyle usage)
+- frontend/public/favicon.svg             (product favicon)
+- frontend/public/icons.svg               (unused leftover)
+
+You may ADD new presentational files under frontend/src/components/** for purely visual primitives (e.g. Surface, PageBackdrop, MotionFade) if they do not fetch or alter stores.
+
+B. MODIFY WITH CAUTION
+
+- frontend/src/App.tsx                    keep BrowserRouter + applyTheme
+- frontend/src/main.tsx                   CSS imports only
+- frontend/src/store/themeStore.ts        keep persist key and html.dark
+- frontend/src/store/uiStore.ts           unused; OK to use for sidebar collapse only
+- frontend/public/bis-logo.png            keep official mark and URL /bis-logo.png or update both call sites together
+- frontend/src/types/chat.ts              unused; do not turn it into a chat product
+- frontend/vite.config.ts                 only if you must add a font plugin; do not touch proxy
+- frontend/package.json                   only to actually import already-installed framer-motion; do not add random UI kits
+
+C. DO NOT MODIFY
+
+Frontend logic/contracts:
+- frontend/src/routes/AppRoutes.tsx
+- frontend/src/hooks/useAuth.ts
+- frontend/src/hooks/useRecommendations.ts
+- frontend/src/hooks/useHistory.ts
+- frontend/src/services/api.ts
+- frontend/src/services/auth.api.ts
+- frontend/src/services/recommendation.api.ts
+- frontend/src/services/history.api.ts
+- frontend/src/services/report.api.ts
+- frontend/src/store/authStore.ts
+- frontend/src/store/recommendationStore.ts
+- frontend/src/types/api.ts
+- frontend/src/types/recommendation.ts
+- frontend/src/types/history.ts
+- frontend/vite.config.ts proxy/alias (prefer no edits at all)
+
+Entire backend:
+- backend/src/server.js
+- backend/src/app.js
+- backend/src/config/db.js
+- backend/src/config/env.js
+- backend/src/config/rag.js
+- backend/src/routes/auth.routes.js
+- backend/src/routes/recommendation.routes.js
+- backend/src/routes/report.routes.js
+- backend/src/controllers/auth.controller.js
+- backend/src/controllers/recommendation.controller.js
+- backend/src/controllers/report.controller.js
+- backend/src/services/auth.service.js
+- backend/src/services/recommendation.service.js
+- backend/src/services/rag.service.js
+- backend/src/services/report.service.js
+- backend/src/services/document.service.js
+- backend/src/models/User.js
+- backend/src/models/RecommendationHistory.js
+- backend/src/middleware/auth.middleware.js
+- backend/src/middleware/upload.middleware.js
+- backend/src/middleware/error.middleware.js
+- backend/src/middleware/rateLimiter.middleware.js   (empty unused file; still do not "clean up")
+- backend/src/utils/apiResponse.js                   (empty unused)
+- backend/src/utils/logger.js                        (empty unused)
+- backend/src/validators/auth.validator.js
+- backend/src/validators/recommendation.validator.js (unused by controllers; still do not edit)
+- backend/package.json
+- any .env files
+
+Other:
+- .kilo/** worktree
+- package-lock files unless a dependency install is explicitly required later
+- Do not create extra markdown/docs besides this audit (already created)
+
+==================================================
+SECTION 11 — VISUAL PRIORITY
+==================================================
+
+Ranked for hackathon judges: visibility, first impression, visual impact, interaction frequency, room to improve. Not business-criticality.
+
+1) Home empty state (frontend/src/pages/Home.tsx)
+First authenticated screen. Logo + H1 + Composer + hero wash. Currently a polite vacant portal. Highest cinematic-hero opportunity.
+
+2) Login (frontend/src/pages/Login.tsx)
+True first impression for anyone logged out. Currently a stock centered card titled like a default app. Highest brand-transformation opportunity per pixel.
+
+3) Composer (frontend/src/components/composer/Composer.tsx)
+The object users touch first and most. A luminous command instrument will sell "AI product" instantly. Keep the control simple.
+
+4) Sidebar (frontend/src/components/sidebar/Sidebar.tsx)
+Always on screen after login. Official bilingual brand lives here. A cheap sidebar makes the whole app feel like a dashboard template.
+
+5) RecommendationCard (frontend/src/components/recommendations/RecommendationCard.tsx)
+The payoff screen judges will screenshot. Dense data can look premium if typography and surface hierarchy improve. Do not lose fields.
+
+6) Home results header + summary + download (Home.tsx result branch)
+The "we finished something important" moment. Editorial header + pull-quote summary + precise download button.
+
+7) Home loading / analyzing state (Home.tsx)
+Judges will sit on this while RAG runs. A calm cinematic wait feels expensive; bounce dots feel student-project.
+
+8) TenderRequirements (TenderRequirements.tsx)
+When a tender is uploaded, this is the "intelligence" panel. Dossier styling will photograph well.
+
+9) TopBar (TopBar.tsx)
+Small but constant. Theme switch is the only live appearance control. A glass cluster finishes the chrome.
+
+10) Register (Register.tsx)
+Same system as Login. Lower traffic than Login but judges may create an account live.
+
+Settings is useful but not a first-impression surface. Redesign it after chrome so it does not clash.
+
+==================================================
+SECTION 12 — CURRENT PROBLEMS
+==================================================
+
+PROBLEM: Browser tab title is "frontend"
+LOCATION: frontend/index.html
+WHY IT MATTERS: Unprofessional first 200ms
+RECOMMENDED UI FIX: Title "BIS Procurement Assistant" or "BIS Recommendation Engine"
+RISK OF CHANGING IT: None
+
+PROBLEM: Favicon is the leftover Vite mark
+LOCATION: frontend/public/favicon.svg referenced by index.html
+WHY IT MATTERS: Breaks official identity
+RECOMMENDED UI FIX: Use BIS mark or a simplified navy/blue glyph
+RISK: Low; keep path or update href together
+
+PROBLEM: Intended Inter font is never loaded
+LOCATION: frontend/src/index.css --font-sans
+WHY IT MATTERS: Typography is inconsistent and not premium
+RECOMMENDED UI FIX: Add a font stylesheet in index.html
+RISK: Low
+
+PROBLEM: Light-mode government-generic visual system
+LOCATION: Login, Register, Home, index.css
+WHY IT MATTERS: Looks like a template, not a flagship AI tool
+RECOMMENDED UI FIX: Cinematic token set + layered surfaces
+RISK: Medium if dark overrides stay as !important spaghetti
+
+PROBLEM: Dark mode is a !important utility rewrite
+LOCATION: frontend/src/index.css lines ~52–225
+WHY IT MATTERS: New classes will miss the map; visual bugs
+RECOMMENDED UI FIX: First-class dark tokens and component dark: classes; delete the override dump once components are migrated
+RISK: Medium during migration; do it early and globally
+
+PROBLEM: shadow-card is used but not defined in @theme
+LOCATION: Login, Register, Home, RecommendationCard, TenderRequirements; only dark override exists
+WHY IT MATTERS: Light cards look flat
+RECOMMENDED UI FIX: Define --shadow-card
+RISK: None
+
+PROBLEM: 1.21 MB hero image at low opacity
+LOCATION: Home.tsx + assets/hero.png
+WHY IT MATTERS: Slow first paint, weak effect
+RECOMMENDED UI FIX: Compress, CSS atmosphere, or smaller asset
+RISK: Low
+
+PROBLEM: Sidebar is not responsive
+LOCATION: Sidebar.tsx w-84.5; Home left-84.5
+WHY IT MATTERS: App is unusable on tablet/phone for judges with laptops in half-screen
+RECOMMENDED UI FIX: Overlay drawer < md; use uiStore.sidebarOpen; decouple hero offset
+RISK: Medium — do not break history click/new analysis
+
+PROBLEM: Settings is visually orphaned; theme cannot be changed there
+LOCATION: Settings.tsx vs TopBar.tsx
+WHY IT MATTERS: Broken mental model
+RECOMMENDED UI FIX: Shared chrome or a theme toggle on Settings that calls themeStore.toggleTheme
+RISK: Low if you only call existing toggleTheme
+
+PROBLEM: TopBar "Account" does nothing
+LOCATION: TopBar.tsx menu item onClick closes menu only
+WHY IT MATTERS: Looks broken
+RECOMMENDED UI FIX: navigate("/settings") or remove the item
+RISK: Low; /settings already exists
+
+PROBLEM: Invalid file types fail silently
+LOCATION: Composer.handleFileChange return
+WHY IT MATTERS: Users think attach is broken
+RECOMMENDED UI FIX: Local UI error string; do not change accepted types
+RISK: Low if local-only state
+
+PROBLEM: Login/Register 400 errors can show a recommendation-specific sentence
+LOCATION: api.ts toFriendlyError case 400
+WHY IT MATTERS: Confusing on auth pages
+RECOMMENDED UI FIX: Prefer not to edit api.ts in a UI pass. Optional later: status-aware messages.
+RISK: High if edited carelessly (affects all 400s)
+
+PROBLEM: History list does not refresh after a new analysis
+LOCATION: useHistory loads once; Home generate does not call refresh
+WHY IT MATTERS: Judge runs an analysis, sidebar still empty until reload
+RECOMMENDED UI FIX: This is behavior, not paint. A UI agent may call existing refresh() after successful generate ONLY if that is considered safe UX wiring. Do not change the hook implementation. If in doubt, leave it.
+RISK: Medium (extra GET, must not disturb result state)
+
+PROBLEM: Duplicate reason text on cards
+LOCATION: RecommendationCard "Why this standard is recommended" and "Standard scope"
+WHY IT MATTERS: Feels unfinished
+RECOMMENDED UI FIX: Keep why-recommended visible; restyle Standard scope or show it only when you later have a distinct field. Do not invent a scope string.
+RISK: Low if you only hide the duplicate accordion when it equals reason
+
+PROBLEM: Unused leftover Vite CSS/assets
+LOCATION: App.css, react.svg, vite.svg, public/icons.svg
+WHY IT MATTERS: Noise for the next agent
+RECOMMENDED UI FIX: Ignore or stop importing (already not imported)
+RISK: None if left alone
+
+PROBLEM: Unused installed animation/query libraries
+LOCATION: package.json vs source
+WHY IT MATTERS: Next agent might add Three.js thinking nothing exists
+RECOMMENDED UI FIX: Use framer-motion; ignore react-query
+RISK: None
+
+PROBLEM: Composer loading UI is dead in the main flow
+LOCATION: Composer loading row; Home unmounts Composer while loading
+WHY IT MATTERS: Split-brain loading design
+RECOMMENDED UI FIX: One loading treatment, Home-owned
+RISK: Low
+
+PROBLEM: No visible focus rings on most buttons
+LOCATION: pages and components
+WHY IT MATTERS: Keyboard/a11y, also looks unfinished when tabbing in a demo
+RECOMMENDED UI FIX: Global :focus-visible styles in index.css
+RISK: Low
+
+PROBLEM: Weak contrast on muted labels
+LOCATION: text-slate-400 throughout
+WHY IT MATTERS: Readability on projectors
+RECOMMENDED UI FIX: Darken muted token
+RISK: Low
+
+PROBLEM: Empty axios timeout vs long RAG jobs
+LOCATION: api.ts timeout 60000 vs rag 1200000
+WHY IT MATTERS: Loading UI may error before the server
+RECOMMENDED UI FIX: Do not change in a UI redesign
+RISK: Do not touch
+
+==================================================
+SECTION 13 — RECOMMENDED IMPLEMENTATION ORDER
+==================================================
+
+1. Global typography
+   Files: frontend/index.html, frontend/src/index.css
+   Load Inter (and optional display font). Set heading/body/label classes or tokens.
+   Do not change components yet except if you add a shared text utility class.
+
+2. Global colors / background
+   Files: frontend/src/index.css, then App.tsx wrapper class if needed
+   Define complete light/dark tokens including --shadow-card.
+   Begin retiring html.dark !important map as components get dark: classes.
+   Keep themeStore class "dark".
+
+3. Navigation chrome
+   Files: Sidebar.tsx, TopBar.tsx
+   Brand, history rows, theme switch, user menu.
+   Optional: wire Account → /settings.
+   Do not change history restore logic.
+
+4. Layout shell
+   Files: Home.tsx, Settings.tsx, index.css
+   Shared atmospheric background, width, sidebar/main relationship.
+   Decouple left-84.5. Add a safe mobile drawer using uiStore if needed, default open on desktop.
+
+5. Primary dashboard (Home empty state)
+   Files: Home.tsx, Composer.tsx, hero.png usage
+   Cinematic hero, logo treatment, composer as focal control.
+
+6. Main workflow (loading + submit feedback)
+   Files: Home.tsx loading branch, Composer.tsx
+   Refined analyzing state; keep Stop; keep activeRequest query/fileName.
+
+7. Data visualization / results (no charts)
+   Files: Home.tsx result branch, RecommendationCard.tsx, TenderRequirements.tsx
+   Editorial header, dossier tender panel, premium cards, warnings, empty zero-state.
+   Keep download + New Analysis.
+
+8. Forms
+   Files: Login.tsx, Register.tsx, Composer.tsx, Sidebar search input
+   Tokens, focus, file chip, brand on auth pages.
+
+9. Micro-interactions
+   Files: any visual component + framer-motion
+   Hover, accordion, hero entrance, card stagger.
+   prefers-reduced-motion.
+
+10. Responsive polish
+    Files: Home.tsx, Sidebar.tsx, TopBar.tsx, Login.tsx, Register.tsx, Settings.tsx
+    Collapse sidebar; stack result header; keep composer usable at 360px.
+
+11. Accessibility
+    Files: index.css focus-visible; labels on search; Escape to close TopBar menu; contrast tokens
+    Do not remove existing aria on Composer/TopBar.
+
+12. Final visual QA
+    Check both themeStore themes.
+    Walk: register/login → empty home → submit (or restore history) → expand cards → download if historyId → settings → logout → login.
+    Confirm no API/field/route regressions.
+    Confirm /bis-logo.png still loads.
+    Confirm no fake recommendations.
+
+==================================================
+SECTION 14 — EMERGENT HANDOFF
+==================================================
+
+PROJECT GOAL:
+UI/UX redesign only of the existing working BIS Recommendation Engine frontend.
+
+ABSOLUTE CONSTRAINTS:
+- no backend changes
+- no database changes
+- no API changes
+- no business logic changes
+- no authentication changes
+- no route path or guard behavior changes
+- no data model changes
+- no fake data / no mock recommendation cards
+- no removal of functionality (composer, history restore, stop, download, theme, logout, warnings, empty states, all card fields)
+- no new analysis modes, chat threads, or extra form fields the API does not accept
+- do not edit files listed in Section 10-C
+- do not invent routes
+- do not add chart or 3D libraries for decoration
+
+DESIGN TARGET:
+Premium cinematic creative-technology interface inspired by Active Theory visual principles (dark atmosphere, editorial type, layered depth, restrained glow, elegant motion) without copying activetheory.net, its 3D work grid, or its brand.
+Must still read as an official BIS / Government of India procurement tool.
+
+PAGES TO REDESIGN:
+1. /login — Login.tsx
+2. /register — Register.tsx
+3. / — Home.tsx (empty, loading, results)
+4. /settings — Settings.tsx
+
+COMPONENTS TO REDESIGN:
+- Sidebar.tsx
+- TopBar.tsx
+- Composer.tsx
+- RecommendationCard.tsx
+- TenderRequirements.tsx
+- Home footer (inline)
+- Global tokens in index.css
+- index.html title/fonts/favicon
+
+FILES SAFE TO MODIFY:
+See Section 10-A.
+
+FILES TO PROTECT:
+See Section 10-C, especially:
+- AppRoutes.tsx
+- all frontend/src/services/*
+- all frontend/src/hooks/*
+- authStore.ts, recommendationStore.ts
+- frontend/src/types/api.ts, recommendation.ts, history.ts
+- entire backend/
+
+EXISTING DEPENDENCIES TO REUSE:
+- react 19, react-dom, react-router-dom
+- tailwindcss 4 + @tailwindcss/vite
+- zustand (theme already persists)
+- axios (do not replace)
+- lucide-react icons (already used everywhere)
+- framer-motion (installed, unused — use this for motion)
+- clsx + tailwind-merge (installed, unused — use for class names)
+- official /bis-logo.png
+
+OPTIONAL DEPENDENCIES WORTH CONSIDERING:
+- None required.
+- Font: Google Fonts link or @fontsource/inter only if you do not want a raw HTML link.
+- Do not add @tanstack/react-query, chart libs, three/r3f, component kits, or form libraries.
+
+BIGGEST VISUAL OPPORTUNITIES:
+1. Auth screens as cinematic branded entry
+2. Home empty hero + Composer as a single iconic instrument
+3. Sidebar as official engraved rail
+4. Results as editorial dossier, not stacked admin cards
+5. One coherent dark/light token system instead of !important overrides
+6. Measured motion via framer-motion
+
+BIGGEST TECHNICAL RISKS:
+1. Touching services/hooks/stores and breaking JWT, history restore, or PDF blob download
+2. Changing route guards or persist keys so users bounce between / and /login
+3. Breaking FormData field "document" or JSON { query, limit: 5 }
+4. Rendering recommendation fields without the existing null-safe defaults (old history records)
+5. Sidebar width / left-84.5 coupling causing layout collapse
+6. Adding heavy WebGL/particles on a page that already loads a 1.2MB image and waits on a long RAG request
+7. Editing toFriendlyError and breaking every form’s error text
+8. Using uiStore.darkMode in parallel with themeStore and desyncing html.dark
+9. Refreshing or remounting Sidebar in a way that drops local selectedId or re-fetches in a loop
+10. Accidental "sample data" to make empty states look full — forbidden
+
+IMPLEMENTATION NOTE FOR THE NEXT AGENT:
+Restyle. Do not re-architect.
+Preserve every handler signature you find.
+If a file both paints and calls an API, change only classNames/JSX structure, not the call.
+When in doubt, leave logic lines untouched.
+
+END OF AUDIT
+)
