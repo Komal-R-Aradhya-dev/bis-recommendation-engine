@@ -1,0 +1,10 @@
+fastapi==0.141.1
+uvicorn==0.53.0
+pymongo==4.18.1
+python-dotenv==1.2.3
+python-multipart==0.0.32
+pymupdf==1.28.2
+pydantic==2.13.5
+fastembed
+groq==1.7.0
+openai==3.14.0
