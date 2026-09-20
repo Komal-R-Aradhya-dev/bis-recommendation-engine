@@ -1,9 +1,12 @@
-import { ArrowLeft, LogOut, Moon, Sun, User } from "lucide-react";
+import { ArrowLeft, LogOut, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useAuthStore } from "@/store/authStore";
+import ThemeToggle from "@/components/layout/ThemeToggle";
+import { useSceneMode } from "@/lib/useSceneMode";
 import { clearToken } from "@/services/api";
+import { useAuthStore } from "@/store/authStore";
 
 export default function Settings() {
+  useSceneMode("settings");
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const clearUser = useAuthStore((state) => state.clearUser);
@@ -15,114 +18,104 @@ export default function Settings() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-slate-800 dark:bg-slate-950 dark:text-slate-100">
-      <div className="mx-auto w-full max-w-5xl px-6 py-8">
+    <div className="relative z-10 min-h-screen overflow-x-hidden text-bis-ink">
+      <div className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-6">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => navigate("/")}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
+            className="flex h-10 w-10 items-center justify-center rounded-xl bis-chrome text-bis-ink"
             title="Back to dashboard"
+            aria-label="Back to dashboard"
           >
             <ArrowLeft size={18} />
           </button>
-
           <div>
-            <h1 className="text-2xl font-semibold text-bis-navy dark:text-slate-100">
-              Settings
-            </h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Manage your account and application preferences.
+            <p className="bis-kicker">Account</p>
+            <h1 className="bis-display mt-1 text-3xl">Settings</h1>
+            <p className="mt-1 text-sm text-bis-muted">
+              Identity, appearance, and session controls.
             </p>
           </div>
         </div>
 
         <div className="mt-8 grid gap-5">
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <section className="bis-surface rounded-2xl p-5">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-bis-blue dark:bg-blue-950/40 dark:text-blue-300">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-bis-blue-soft text-bis-accent">
                 <User size={20} />
               </div>
-
               <div>
-                <h2 className="font-semibold text-slate-800 dark:text-slate-100">
-                  Account
-                </h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+                <p className="font-mono text-[11px] tracking-[0.14em] text-bis-muted uppercase">
+                  01 · Identity
+                </p>
+                <h2 className="mt-1 font-semibold text-bis-ink">Signed-in account</h2>
+                <p className="text-sm text-bis-muted">
                   Your authenticated account information.
                 </p>
               </div>
             </div>
-
             <div className="mt-5 grid gap-4 sm:grid-cols-3">
               <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                <p className="font-mono text-[11px] tracking-[0.14em] text-bis-muted uppercase">
                   Name
                 </p>
-                <p className="mt-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+                <p className="mt-1 text-sm font-medium text-bis-ink">
                   {user?.name ?? "—"}
                 </p>
               </div>
-
               <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                <p className="font-mono text-[11px] tracking-[0.14em] text-bis-muted uppercase">
                   Email
                 </p>
-                <p className="mt-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+                <p className="mt-1 text-sm font-medium text-bis-ink">
                   {user?.email ?? "—"}
                 </p>
               </div>
-
               <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                <p className="font-mono text-[11px] tracking-[0.14em] text-bis-muted uppercase">
                   Role
                 </p>
-                <p className="mt-1 text-sm font-medium text-slate-700 dark:text-slate-200">
+                <p className="mt-1 text-sm font-medium text-bis-ink">
                   {user?.role ?? "—"}
                 </p>
               </div>
             </div>
           </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-bis-blue dark:bg-blue-950/40 dark:text-blue-300">
-                <Sun size={20} />
-              </div>
-
+          <section className="bis-surface rounded-2xl p-5">
+            <div className="flex flex-wrap items-center gap-3">
               <div>
-                <h2 className="font-semibold text-slate-800 dark:text-slate-100">
-                  Appearance
-                </h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Use the theme control in the top bar to switch between light
-                  and dark mode.
+                <p className="font-mono text-[11px] tracking-[0.14em] text-bis-muted uppercase">
+                  02 · Appearance
+                </p>
+                <h2 className="mt-1 font-semibold text-bis-ink">Theme</h2>
+                <p className="text-sm text-bis-muted">
+                  Light is the default. Dark remains quiet and atmospheric.
                 </p>
               </div>
-
-              <Moon size={18} className="ml-auto text-slate-400" />
+              <ThemeToggle className="ml-auto" />
             </div>
           </section>
 
-          <section className="rounded-2xl border border-red-200 bg-white p-5 shadow-sm dark:border-red-900/50 dark:bg-slate-900">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400">
+          <section className="bis-surface rounded-2xl p-5">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-bis-danger/10 text-bis-danger">
                 <LogOut size={20} />
               </div>
-
-              <div className="flex-1">
-                <h2 className="font-semibold text-slate-800 dark:text-slate-100">
-                  Sign out
-                </h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Sign out of the BIS Procurement Assistant.
+              <div className="min-w-0 flex-1">
+                <p className="font-mono text-[11px] tracking-[0.14em] text-bis-muted uppercase">
+                  03 · Session
+                </p>
+                <h2 className="mt-1 font-semibold text-bis-ink">Sign out</h2>
+                <p className="text-sm text-bis-muted">
+                  End this session on this device.
                 </p>
               </div>
-
               <button
                 type="button"
                 onClick={handleLogout}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
+                className="rounded-lg bg-bis-danger px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
               >
                 Sign out
               </button>

@@ -37,6 +37,7 @@ export async function submitRecommendation(
       },
       {
         signal: params.signal,
+        timeout: 1_200_000,
       },
     );
 
@@ -58,6 +59,7 @@ export async function submitRecommendation(
     formData,
     {
       signal: params.signal,
+      timeout: 1_200_000,
     },
   );
 

@@ -37,12 +37,37 @@ api.interceptors.request.use((config) => {
 });
 
 // Friendly, non-leaking error messages.
+function firstServerMessage(data: unknown): string | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const payload = data as { message?: unknown; errors?: unknown };
+
+  if (typeof payload.message === "string" && payload.message.trim()) {
+    return payload.message;
+  }
+
+  if (payload.errors && typeof payload.errors === "object") {
+    const first = Object.values(payload.errors as Record<string, unknown>).find(
+      (value): value is string =>
+        typeof value === "string" && value.trim().length > 0,
+    );
+
+    if (first) {
+      return first;
+    }
+  }
+
+  return null;
+}
+
 export function toFriendlyError(error: unknown): string {
   if (axios.isCancel(error)) {
     return "Generation stopped.";
   }
 
-  const err = error as AxiosError<{ message?: string }>;
+  const err = error as AxiosError<{ message?: string; errors?: Record<string, string> }>;
 
   if (
     err.code === "ERR_CANCELED" ||
@@ -56,23 +81,32 @@ export function toFriendlyError(error: unknown): string {
     return "Network error. Please check your connection and try again.";
   }
 
+  const serverMessage = firstServerMessage(err.response.data);
+
   switch (err.response.status) {
     case 400:
-      return "Please provide a query or a tender document to analyze.";
+      return (
+        serverMessage ??
+        "Please provide a query or a tender document to analyze."
+      );
 
     case 401:
-      return "Your session has expired. Please log in again.";
+      return serverMessage ?? "Your session has expired. Please log in again.";
 
     case 502:
-      return "The recommendation service is temporarily unavailable. Please try again shortly.";
+      return (
+        serverMessage ??
+        "The service is temporarily unavailable. Please try again shortly."
+      );
 
     case 504:
-      return "The analysis is taking longer than expected. Please try again.";
+      return (
+        serverMessage ??
+        "The analysis is taking longer than expected. Please try again."
+      );
 
     default:
-      return (
-        err.response.data?.message ?? "Something went wrong. Please try again."
-      );
+      return serverMessage ?? "Something went wrong. Please try again.";
   }
 }
 
