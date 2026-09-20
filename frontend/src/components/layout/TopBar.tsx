@@ -1,20 +1,21 @@
-import { ChevronDown, LogOut, Moon, Sun, UserCircle } from "lucide-react";
-import { useState } from "react";
+import { ChevronDown, LogOut, Menu, UserCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuthStore } from "@/store/authStore";
+import ThemeToggle from "@/components/layout/ThemeToggle";
+import { cn } from "@/lib/cn";
 import { clearToken } from "@/services/api";
-import { useThemeStore } from "@/store/themeStore";
+import { useAuthStore } from "@/store/authStore";
 
-export default function TopBar() {
+interface TopBarProps {
+  onMenuToggle?: () => void;
+}
+
+export default function TopBar({ onMenuToggle }: TopBarProps) {
   const navigate = useNavigate();
-
   const user = useAuthStore((state) => state.user);
   const clearUser = useAuthStore((state) => state.clearUser);
-
-  const theme = useThemeStore((state) => state.theme);
-  const toggleTheme = useThemeStore((state) => state.toggleTheme);
-
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const initial = user?.name?.charAt(0).toUpperCase() ?? "U";
 
@@ -25,120 +26,119 @@ export default function TopBar() {
     navigate("/login", { replace: true });
   }
 
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
   return (
-    <header className="flex h-20 shrink-0 items-center justify-end px-8">
-      <div className="relative flex items-center gap-4">
-        {/* Light mode icon */}
-        <Sun
-          size={21}
-          strokeWidth={1.7}
-          className={theme === "light" ? "text-bis-blue" : "text-slate-400"}
-        />
-
-        {/* Theme switch */}
+    <header className="sticky top-3 z-20 mx-3 shrink-0 sm:mx-5 lg:mx-6">
+      <div className="bis-chrome flex h-14 items-center justify-between gap-3 rounded-2xl px-2.5 sm:h-16 sm:px-3">
         <button
           type="button"
-          onClick={toggleTheme}
-          aria-label={
-            theme === "light" ? "Switch to dark mode" : "Switch to light mode"
-          }
-          title={
-            theme === "light" ? "Switch to dark mode" : "Switch to light mode"
-          }
-          className={`relative h-8 w-14 rounded-full transition ${
-            theme === "dark" ? "bg-slate-700" : "bg-blue-100 hover:bg-blue-200"
-          }`}
+          onClick={onMenuToggle}
+          className="flex h-10 w-10 items-center justify-center rounded-xl text-bis-ink md:hidden"
+          aria-label="Open navigation"
         >
-          <span
-            className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow-sm transition-all ${
-              theme === "dark" ? "left-1" : "right-1"
-            }`}
-          />
+          <Menu size={18} />
         </button>
 
-        {/* Dark mode icon */}
-        <Moon
-          size={20}
-          strokeWidth={1.7}
-          className={theme === "dark" ? "text-blue-300" : "text-slate-600"}
-        />
+        <p className="hidden min-w-0 truncate font-mono text-[11px] tracking-[0.14em] text-bis-muted uppercase md:block">
+          Indian Standards Intelligence
+        </p>
 
-        {/* User menu */}
-        <button
-          type="button"
-          onClick={() => setMenuOpen((value) => !value)}
-          aria-expanded={menuOpen}
-          aria-haspopup="menu"
-          className="flex items-center gap-2 rounded-full p-1 transition hover:bg-slate-50 dark:hover:bg-slate-800"
-        >
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-bis-blue-soft text-base font-semibold text-bis-blue dark:bg-slate-700 dark:text-blue-300">
-            {initial}
-          </span>
+        <div className="relative ml-auto flex items-center gap-1.5" ref={menuRef}>
+          <ThemeToggle compact />
 
-          <ChevronDown
-            size={16}
-            className={`text-slate-500 transition-transform dark:text-slate-400 ${
-              menuOpen ? "rotate-180" : ""
-            }`}
-          />
-        </button>
-
-        {menuOpen && (
-          <div
-            role="menu"
-            className="absolute right-0 top-14 z-50 w-72 overflow-hidden rounded-2xl border border-border-light bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900"
+          <button
+            type="button"
+            onClick={() => setMenuOpen((value) => !value)}
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            className="flex items-center gap-2 rounded-full p-1 transition hover:bg-bis-surface-strong"
           >
-            {/* User information */}
-            <div className="border-b border-slate-100 px-4 py-4 dark:border-slate-700">
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-bis-blue-soft text-base font-semibold text-bis-blue dark:bg-slate-700 dark:text-blue-300">
-                  {initial}
-                </div>
-
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-bis-navy dark:text-slate-100">
-                    {user?.name ?? "User"}
-                  </p>
-
-                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                    {user?.email ?? ""}
-                  </p>
-                </div>
-              </div>
-
-              {user?.role && (
-                <div className="mt-3">
-                  <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                    {user.role}
-                  </span>
-                </div>
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-bis-blue-soft text-sm font-semibold text-bis-accent">
+              {initial}
+            </span>
+            <ChevronDown
+              size={16}
+              className={cn(
+                "mr-1 hidden text-bis-muted transition-transform sm:block",
+                menuOpen && "rotate-180",
               )}
-            </div>
+            />
+          </button>
 
-            {/* Account actions */}
-            <div className="p-2">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-600 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                <UserCircle size={18} />
-                Account
-              </button>
-
-              <button
-                type="button"
-                role="menuitem"
-                onClick={handleLogout}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-red-600 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-              >
-                <LogOut size={18} />
-                Sign out
-              </button>
+          {menuOpen && (
+            <div
+              role="menu"
+              className="bis-surface absolute right-0 top-14 z-50 w-72 overflow-hidden rounded-2xl"
+            >
+              <div className="border-b border-bis-line px-4 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-bis-blue-soft text-base font-semibold text-bis-accent">
+                    {initial}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-bis-ink">
+                      {user?.name ?? "User"}
+                    </p>
+                    <p className="truncate text-xs text-bis-muted">
+                      {user?.email ?? ""}
+                    </p>
+                  </div>
+                </div>
+                {user?.role && (
+                  <div className="mt-3">
+                    <span className="inline-flex rounded-full bg-bis-blue-soft px-2.5 py-1 font-mono text-[11px] text-bis-ink">
+                      {user.role}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="p-2">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    navigate("/settings");
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-bis-ink transition hover:bg-bis-surface-strong"
+                >
+                  <UserCircle size={18} />
+                  Account
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleLogout}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-bis-danger transition hover:bg-bis-danger/10"
+                >
+                  <LogOut size={18} />
+                  Sign out
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </header>
   );
